@@ -166,6 +166,83 @@ build/
 根本的に安全なのは、`.env` ファイルに値を書かず、**シークレットマネージャー**（AWS Secrets Manager、HashiCorp Vault、1Passwordなど）を使う方法です。秘密が実行時にだけ読み込まれてディスク上に残らなければ、ツールや攻撃者が読み取るものがそもそも存在しません。
 （出典: [Jad Joubran](https://jadjoubran.io/blog/prevent-claude-code-env)、[Martin Paul Eve](https://eve.gd/2026/04/19/claude-code-can-consume-transmit-and-compromise-your-env-files-even-if-you-tell-it-not-to/)）
 
+#### 仕組み：何が変わるのか
+
+**従来（.envに値を直接書く）**
+
+```
+.env ファイル（ディスク上に平文で存在）
+  OPENAI_API_KEY=sk-abc123realkey   ← 実際の値がそのまま書いてある
+        ↓
+アプリが起動時に読み込む
+```
+
+ディスク上に本物のキーがずっと置かれているのが弱点です。
+
+**シークレットマネージャー利用時**
+
+```
+.env ファイル（参照だけ書く）
+  OPENAI_API_KEY=op://dev/openai/credential   ← 「金庫のここにある」という住所だけ
+        ↓
+アプリ起動時に金庫（1Passwordなど）から実際の値を取りに行く
+        ↓
+メモリ上にだけ展開され、ディスクには本物が残らない
+```
+
+`.env` には「金庫の住所」しか書かれていないため、万が一このファイルが漏れても本物の鍵は手に入りません。
+
+#### 例1：1Password（ローカル開発で始めやすい）
+
+**手順1**：1Passwordに鍵を保管します（例：vault名「dev」、アイテム名「openai」、フィールド「credential」）。
+
+**手順2**：`.env` には参照（住所）だけ書きます。
+
+```bash
+# .env の中身（本物の値は書かない）
+OPENAI_API_KEY=op://dev/openai/credential
+```
+
+`op://` で始まるのが1Passwordの参照記法で、「devという金庫のopenaiというアイテムのcredentialフィールド」という住所を指します。値そのものではありません。
+
+**手順3**：実行時に `op run` で値を注入します。
+
+```bash
+# 起動の瞬間だけ住所を実際の値に置き換えてアプリに渡す
+op run --env-file=.env -- python main.py
+```
+
+このとき本物のキーはメモリ上にだけ存在し、ディスクには書き込まれません。
+
+#### 例2：AWS Secrets Manager（AWS上の本番アプリ向け）
+
+サーバーをAWSで動かしている場合の定番です。`.env` に書かず、コードが起動時にAWSから直接取得します。
+
+```python
+import boto3
+import json
+
+# 起動時にAWSの金庫から取得
+client = boto3.client("secretsmanager")
+response = client.get_secret_value(SecretId="prod/openai")
+api_key = json.loads(response["SecretString"])["OPENAI_API_KEY"]
+```
+
+#### どれを選べばいい？
+
+| 状況 | おすすめ |
+|---|---|
+| 個人開発・ローカル中心 | 1Password（すでに使っているなら特に） |
+| チーム開発 | 1Password / HashiCorp Vault |
+| AWS上で動かす本番アプリ | AWS Secrets Manager |
+| Google Cloud上 | Google Secret Manager |
+
+最初のハードルが低いのは1Passwordです。すでに使っているなら、`.env` の値を `op://` 参照に書き換えるところから始められます。
+
+> **補足**：シークレットマネージャーの導入は少し手間がかかります。まずは セクション2〜4 の基本（`.env`への分離・`.gitignore`・`permissions.deny`）を確実に行い、扱う秘密の重要度が高い場合や本番運用の段階でシークレットマネージャーへ移行するのが現実的です。
+>
+> 1Password / AWS / GCP / Vault それぞれの具体的な導入手順は、別ファイル「[シークレットマネージャー導入ガイド](./SECRETS_MANAGER_GUIDE.md)」にまとめています。
+
 ---
 
 ## 5. CLAUDE.md にルールを書く
