@@ -54,10 +54,42 @@ C:\Users\ユーザー名>           ← Windows
 
 ## このプラグインは何をするのか
 
-Claudeが書いたコードの脆弱性をその場でチェックし、同じ作業の流れの中で修正してくれます。SQLインジェクションや危険なコードの書き方などを、本番に反映される前に見つけてくれます。一度入れれば自動で動くので、毎回コマンドを打つ必要はありません。
+このプラグインを入れると、**Claudeが自分で書いたコードを自分でセキュリティチェックして、危険な箇所をその場で直してくれる**ようになります。問題のあるコードが完成したり、本番環境に反映されたりする前に食い止めるのが目的です。一度入れれば自動で動くので、毎回コマンドを打つ必要はありません。
 （出典: [Anthropic公式ドキュメント](https://code.claude.com/docs/en/security-guidance)）
 
-Anthropic社内では、このプラグインを使ったPRのセキュリティ関連の指摘が30〜40%減ったと報告されています。
+### 具体的に何を見つけてくれるのか
+
+公式ドキュメントによると、以下のような代表的な脆弱性を検出できます。
+
+- **インジェクション攻撃**（SQLインジェクション、コマンドインジェクションなど）
+  ユーザーの入力をそのままデータベースやコマンドに渡してしまい、攻撃者に不正な操作を許してしまう問題。例：ログイン画面から全ユーザーのデータを抜き取られる。
+- **認可バイパス（authorization bypass）**
+  ログインや権限チェックをすり抜けられてしまう問題。例：一般ユーザーが管理者画面に入れてしまう。
+- **安全でない直接オブジェクト参照（IDOR）**
+  URLのIDを書き換えるだけで他人のデータが見えてしまう問題。
+- **SSRF（サーバーサイドリクエストフォージェリ）**
+  サーバーを踏み台にして、本来アクセスできない内部ネットワークに侵入される問題。
+- **安全でないデシリアライズ**
+  外部から受け取ったデータを展開する際に、悪意あるコードを実行されてしまう問題。
+- **危険なDOM API**（XSSなど）
+  `innerHTML` などの使い方が原因で、他人のブラウザ上で勝手にスクリプトを実行される問題。
+- **弱い暗号（weak cryptography）**
+  古くて破られやすい暗号方式を使ってしまう問題。
+
+（出典: [Help Net Security](https://www.helpnetsecurity.com/2026/05/27/anthropic-claude-code-security-guidance-plugin/)、[Anthropic公式ドキュメント](https://code.claude.com/docs/en/security-guidance)）
+
+### どのタイミングでチェックするのか（3段階）
+
+1. **ファイルを編集した瞬間** — 危険なコードの書き方を高速でパターンチェック（AIを使わないので一瞬・追加コストなし）
+2. **Claudeが応答を終えた瞬間** — そのとき変更したコード全体をAIがバックグラウンドでレビュー
+3. **コミット・プッシュする瞬間** — 周辺のファイルや関連するコードまで読み込んだ、より深いレビュー
+
+すべて自動で動くため、開発者が別途ツールを立ち上げたり、コマンドを覚えたりする必要はありません。
+（出典: [Anthropic公式ドキュメント](https://code.claude.com/docs/en/security-guidance)）
+
+### どれくらい効果があるのか
+
+Anthropic社内のロールアウトとベンチマークでは、このプラグインを使って開いたPR（プルリクエスト）のセキュリティ関連の指摘が30〜40%減ったと報告されています。本格的なコードレビューの前に、問題を先回りして潰してくれる「最初のふるい」として機能します。
 （出典: [Help Net Security](https://www.helpnetsecurity.com/2026/05/27/anthropic-claude-code-security-guidance-plugin/)）
 
 ---
@@ -72,9 +104,6 @@ Anthropic社内では、このプラグインを使ったPRのセキュリティ
 1. `Windowsキー` を押す
 2. `PowerShell` と入力してEnter
 
-> **Pythonの仮想環境（.venv）に入っている場合**
-> プロンプトの先頭に `(.venv)` などと表示されていることがあります。この状態でも以下の手順は問題なく進められますが、気になる場合は `deactivate` と入力すると仮想環境から抜けられます。
-
 ---
 
 ## Step 1：Claude Code をインストールする 〔ターミナルで〕
@@ -84,12 +113,14 @@ Anthropic社内では、このプラグインを使ったPRのセキュリティ
 ### Mac / Linux の場合
 
 ```bash
+# claude.aiから公式インストーラーをダウンロードして実行する
 curl -fsSL https://claude.ai/install.sh | bash
 ```
 
 または [Homebrew](https://brew.sh) を使う場合：
 
 ```bash
+# Homebrew経由でClaude Codeを入れる
 brew install --cask claude-code
 ```
 
@@ -98,12 +129,14 @@ brew install --cask claude-code
 PowerShellで次を実行します。
 
 ```powershell
+# claude.aiから公式インストーラーをダウンロードして実行する
 irm https://claude.ai/install.ps1 | iex
 ```
 
 または [WinGet](https://learn.microsoft.com/windows/package-manager/) を使う場合：
 
 ```powershell
+# WinGet経由でClaude Codeを入れる
 winget install Anthropic.ClaudeCode
 ```
 
@@ -113,6 +146,7 @@ winget install Anthropic.ClaudeCode
 ### インストールの確認 〔ターミナルで〕
 
 ```bash
+# Claude Codeのバージョンを表示する（入っていれば数字が出る）
 claude --version
 ```
 
@@ -126,6 +160,7 @@ claude --version
 ## Step 2：Claude Code を起動する 〔ターミナルで〕
 
 ```bash
+# Claude Codeを起動する
 claude
 ```
 
@@ -140,12 +175,14 @@ claude
 Claude Codeのプロンプト（入力待ちの状態）になったら、次を入力してEnterを押します。このプラグインはAnthropic公式マーケットプレイス `claude-plugins-official`（[GitHub](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/security-guidance)）で配布されています。
 
 ```
+# セキュリティガイダンスのプラグインをインストールする
 /plugin install security-guidance@claude-plugins-official
 ```
 
 > **「マーケットプレイスが見つからない」と表示された場合**
 > 先に次を入力してから、もう一度上のコマンドを入力してください。これはAnthropic公式リポジトリを登録するコマンドです。
 > ```
+> # 公式のプラグイン配布元を登録する
 > /plugin marketplace add anthropics/claude-plugins-official
 > ```
 
@@ -165,6 +202,7 @@ Claude Codeのプロンプト（入力待ちの状態）になったら、次を
 次を入力してEnterを押します。
 
 ```
+# インストールしたプラグインを読み込み直して有効にする
 /reload-plugins
 ```
 
